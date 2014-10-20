@@ -1,0 +1,141 @@
+diff -r dddc4dbe3cff -r be0821e84229 clewn/debugger.py
+--- a/clewn/debugger.py	Thu Mar 13 16:01:50 2014 +0100
++++ b/clewn/debugger.py	Fri Feb 06 15:10:36 2015 +0000
+@@ -988,7 +988,9 @@
+         An empty entry deletes the key in the mapkeys dictionary.
+ 
+         """
+-        path = os.environ.get('CLEWNDIR')
++        path = self.options.clewndir
++        if not path:
++            path = os.environ.get('CLEWNDIR')
+         if not path:
+             path = os.environ.get('HOME')
+         if not path:
+diff -r dddc4dbe3cff -r be0821e84229 clewn/vim.py
+--- a/clewn/vim.py	Thu Mar 13 16:01:50 2014 +0100
++++ b/clewn/vim.py	Fri Feb 06 15:10:36 2015 +0000
+@@ -589,6 +589,11 @@
+                 % ', '.join(misc.LOG_LEVELS))
+         parser.add_option('-f', '--file', metavar='FILE',
+                 help='set the log file name to FILE')
++        parser.add_option('--clewndir',
++                type='string', default='',
++                help='set the directory holding additional configuration, such'
++                ' as key mapping files.')
++
+         (self.options, args) = parser.parse_args(args=argv)
+ 
+         if self.options.simple:
+diff -r dddc4dbe3cff -r be0821e84229 runtime/autoload/pyclewn.vim
+--- a/runtime/autoload/pyclewn.vim	Thu Mar 13 16:01:50 2014 +0100
++++ b/runtime/autoload/pyclewn.vim	Fri Feb 06 15:10:36 2015 +0000
+@@ -15,7 +15,13 @@
+ " the ':Pyclewn' vim command is run.
+ " They may be changed to match your preferences.
+ 
+-let s:pgm = ${pgm}
++let s:pgm =g:pyclewn_home."/bin/pyclewn"
++
++if exists("g:local_python_path")
++    let s:preamble = g:local_python_path
++else
++    let s:preamble = ""
++endif
+ 
+ if exists("pyclewn_args")
+   let s:args = pyclewn_args
+@@ -92,6 +98,21 @@
+     call s:info("Creation of vim script file \"" . a:filename . "\": OK.\n")
+ endfunction
+ 
++function pyclewn#reset()
++    if has("netbeans_enabled")
++        nbclose
++    endif 
++
++    " remove console and dbgvar buffers from previous session
++    if bufexists("(clewn)_console")
++        bwipeout (clewn)_console
++    endif
++    if bufexists("(clewn)_dbgvar")
++        bwipeout (clewn)_dbgvar
++    endif
++
++endfunction
++
+ " Start pyclewn and vim netbeans interface.
+ function s:start(args)
+     if !exists(":nbstart")
+@@ -103,19 +124,34 @@
+     if !executable(s:pgm)
+         throw "Error: '" . s:pgm . "' cannot be found or is not an executable."
+     endif
++    if !empty(s:preamble) && !executable(s:preamble)
++        throw "Error: '" . s:preamble 
++                       \ . "' cannot be found or is not an executable."
++    elseif !empty(s:preamble)
++        let l:preamble = s:preamble . " "
++    else
++        let l:preamble = ""
++    endif
++
+     let l:tmpfile = tempname()
+ 
+-    " remove console and dbgvar buffers from previous session
+-    if bufexists("(clewn)_console")
+-        bwipeout (clewn)_console
+-    endif
+-    if bufexists("(clewn)_dbgvar")
+-        bwipeout (clewn)_dbgvar
+-    endif
++    call pyclewn#reset()
+ 
+     " start pyclewn and netbeans
+-    call s:info("Starting pyclewn.\n")
+-    exe "silent !${start}" . s:pgm . " " . a:args . " " . s:fixed . l:tmpfile . " &"
++    call s:info("Starting pyclewn with args '" . a:args . "'\n")
++    let l:cmd = "silent !" 
++        \ . l:preamble 
++        \ . s:pgm 
++        \ . " " 
++        \ . a:args 
++        \ . " " 
++        \ . s:fixed 
++        \ . l:tmpfile 
++        \ . " &"
++
++    call s:info("Full commmand = '" . l:cmd . "'\n")
++    exe l:cmd
++    
+     call s:info("Running nbstart, <C-C> to interrupt.\n")
+     call s:pyclewn_ready(l:tmpfile)
+     exe "nbstart :" . s:connection
+@@ -151,6 +187,8 @@
+             if a:0 > 1
+                 let l:args .= " --args \"" . join(a:000[1:], ' ') . "\""
+             endif
++        elseif a:1 ==# "--args"
++            let l:args .= " " . join(a:000[1:], ' ')
+         else
+             call s:error("Invalid optional first argument: must be 'pdb'.")
+             return
+diff -r dddc4dbe3cff -r be0821e84229 runtime/plugin/pyclewn.vim
+--- a/runtime/plugin/pyclewn.vim	Thu Mar 13 16:01:50 2014 +0100
++++ b/runtime/plugin/pyclewn.vim	Fri Feb 06 15:10:36 2015 +0000
+@@ -7,6 +7,9 @@
+ " pyclewn version
+ let g:pyclewn_version = "pyclewn-__tag__"
+ 
++let s:plugin_path = escape(expand('<sfile>:p:h'), '\')
++let g:pyclewn_home = s:plugin_path."/../"
++
+ " enable balloon_eval
+ if has("balloon_eval")
+     set ballooneval
+@@ -14,4 +17,4 @@
+ endif
+ 
+ " The 'Pyclewn' command starts pyclewn and vim netbeans interface.
+-command -nargs=* -complete=file Pyclewn call pyclewn#StartClewn(<f-args>)
++command! -nargs=* -complete=file Pyclewn call pyclewn#StartClewn(<f-args>)

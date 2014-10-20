@@ -1,0 +1,219 @@
+*remotedebug.txt*  RemoteDebug, gdb remote debugging for vim    *remotedebug*
+                                                                *RemoteDebug*
+
+                            REMOTEDEBUG MANUAL
+
+1. About RemoteDebug                               |remotedebug-about|
+2. Quick Start                                     |remotedebug-quickstart|
+3. Configureing Profiles                           |remotedebug-profiles|
+4. Usage                                           |remotedebug-usage|
+ 4.1. Running and Attaching                        |remotedebug-run|
+ 4.2. Debugging                                    |remotedebug-debugging|
+5. Options                                         |remotedebug-options|
+6. Pyclewn Patch                                   |remotedebug-patch|
+
+=============================================================================
+1. ABOUT REMOTEDEBUG ~
+                                                          *remotedebug-about*
+
+RemoteDebug is a tool extending and building on the |pyclewn| debugging
+pluggin for gdb. It allows debugging on remote servers using gdbserver and
+passwordless ssh.
+
+RemoteDebug allows you to...
+
+  - run processes on remote systems and debug them using gdb from within vim
+  - attach to proceses on remote system and debug the using gdb from within
+    vim
+  - store profiles for quick access to commonly debugged applicaitons
+
+=============================================================================
+2. QUICK START ~
+                                                     *remotedebug-quickstart*
+
+1. Introduction:
+
+  Basic steps to configure and use RemoteDebug:
+  - setup passwordless ssh between the development account and the account
+    running the applicaiton
+  - create some debuggin profiles in ~/.remotedebug.profiles
+
+2. Install dependencies
+
+  RemoteDebug relies on the following plugins:
+  - pyclewn (with local modifications. See |remotedebug-patch|)
+  - Tail-Bundle
+
+3. Setup passwordless ssh:
+
+  This is well documented on the internet.
+
+4. Create debug profiles
+
+  Profiles tell the plugin:
+  - which host to run the application on
+  - where the binary can be found on the remote host
+  - how to run gdbserver on the remote host
+  - when attaching, how to get the PID of the remote proess
+
+  They are stored in ~/.remotedebug.profiles as a series of calls to
+  |DebugProfileSet|
+
+
+=============================================================================
+3. PROFILES ~
+                                                       *remotedebug-profiles*
+
+Profiles can be selected either from the Debug menu or using the
+|DebugProfile| command. Additionally |DebugRun| and |DebugAttach| commands
+take the profile name as optional argument.
+
+The following commands exist for manipulating profiles:
+
+*:DebugProfileSet* - Create or replace a debug profile
+
+Arguments: 
+  - profile_name   = The display name for the profile
+  - binary_path    = Path to the binary on the LOCAL system
+  - credentials    = user@host to pass to ssh 
+  - gdbserver_path = command to execute gdbserver on REMOTE host
+  - run_command    = command to run the application on REMOTE host
+  - pid_command    = command to get the PID of the running app on REMOTE host 
+
+For example:
+>
+  DebugProfileSet Test@testserver
+            \ $PATH_TO_APPLICATION/bin/test_App
+            \ tester@testserver
+            \ /usr/local/bin/gdbserver
+            \ test_App\ -c\ test_App.config
+            \ test_FindPID\ test_App
+<
+
+NOTE: spaces in command arguments must be escaped with \
+
+Example test_FindPID script:
+>
+  ps | grep $1 | awk '{print $1}'
+<
+
+*:DebugProfile* - Set the current debug profile
+
+Arguments:
+  - profile_name = The name for the profile configured with |DebugProfileSet|
+
+For example:
+>
+  DebugProfile Test@testserver
+<
+
+=============================================================================
+4. USAGE ~
+                                                          *remotedebug-usage*
+
+4.1. RUNNING AND ATTACHING ~
+                                       *remotedebug-attach* *remotedebug-run*
+
+Initiating debugging can be done either from the Debug menu (Run or Attach 
+commands) or from the command line, using |DebugRun| or |DebugAttach|
+
+A profile must be loaded prior to using the menu commands. A profile may be
+supplied to the |DebugRun| and |DebugAttach| commands which perform a
+|DebugProfile| for you.
+
+                                                                  *:DebugRun*
+*DebugRun* - Run the applicaiton remotely and attach the debugger
+
+Arguments:
+  - port         = debugging port. specify a port or 0 to use the default
+  - profile_name = (optional) profile to activate  
+
+Example:
+>
+  " Load a profile and use the default
+  :DebugRun 0 test@testserver
+
+  " Manually load a profile, and use a specific bind port
+  :DebugProfile test@testserver
+  :DebugRun 19992
+<
+
+                                                               *:DebugAttach*
+*DebugAttach* - Attach to the remote application in the debugger
+
+Arguments:
+  - port         = debugging port. specify a port or 0 to use the default
+  - profile_name = (optional) profile to activate  
+
+>
+  " Load a profile and use the default
+  :DebugAttach 0 test@testserver
+
+  " Manually load a profile, and use a specific bind port
+  :DebugProfile test@testserver
+  :DebugAttach 19992
+<
+
+*DebugReset* - Stop debugging and clean up processes           *:DebugReset*
+
+This command:
+  - if running the process remotely, kills it
+  - if attached to the process, detaches
+  - closes down |pyclewn|
+
+The effect of detaching or killing is that the remote gdbserver instance is
+closed. This command is automatically called when quiting vim to ensure that
+no processes are left dangling.
+
+2. DEBUGGING APPLICATION
+                                                    *remotedebug-debugging*
+
+Once the debugger is attached, the usage is as documented in |pyclewn|.
+
+|RemoteDebug| offers additional command in the form of a vim menu to:
+  - Interrupt the process
+  - Step over, into and out of functions
+  - Continue the process
+  - Set and clear breakpoints
+
+=============================================================================
+5. OPTIONS ~
+                                                        *remotedebug-options*
+
+The following globa options can be set in .vimrc (or wherever):
+
+*g:remotedebug_port*
+  default debugging port used when passing 0 to |DebugRun| or |DebugAttach|
+  or when using Run or Attach from the Debug menu
+  default: 20001
+  see: |remotedebug-usage|
+
+*g:remotedebug_profile_path* 
+  path to file defining profiles.
+  default: ~/.remotedebug.profiles
+  see: |remotedebug-profiles|
+
+*g:remotedebug_auto_map_keys* 
+  set to 0 to disable mapping of keys when debugging is started. 
+  default: enabled
+  see: |Cmapkeys|
+
+*g:remotedebug_auto_sync_symbols* 
+  set to 0 to disable syncing of command line completion when debugging
+  default: enabled
+  see: |Csymcompletion|
+
+=============================================================================
+6. PYCLEWN PATCH ~
+                                                          *remotedebug-patch*
+
+Minor enhanements to pyclewn were required to make RemoteDebug work. The diffs
+are included here in case the pull is not accepted upstream.
+
+The changes allow the |DebugReset| command to work.
+
+The patch file can be found in the RemoteDebug installation under the patch
+folder 
+
+" vim: set expandtab sts=2 ts=2 sw=2 tw=78 ft=help norl:
+
