@@ -331,8 +331,6 @@ endfunction
 let s:profile_path = expand(g:remotedebug_profile_path)
 if filereadable(s:profile_path)
     execute "source " . s:profile_path
-else
-    call s:info('no profile script at ' . s:profile_path)
 endif
 "}}}
 
