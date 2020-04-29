@@ -74,6 +74,33 @@ command! -nargs=* -complete=custom,remotedebug#CompleteProfile DebugProfile
             \ call remotedebug#LoadProfile(<f-args>)
 "}}}
 
+" Command: DebugHost {{{
+"
+" The 'DebugHost' command generates and ad-hoc profile with just the supplied
+" credentials. This is useful when you just want to call DebugDispatch
+"
+" Args:
+"   0   - credentials
+command! -nargs=* DebugHost
+            \ call remotedebug#LoadHostOnly(<f-args>)
+"}}}
+
+" Command: DebugDispatch {{{
+"
+" The 'DebugDispatch' command runs an arbitrary command using vim-dispatch on
+" the remote host. This is useful, for example, to run your tests on a remote
+" host and use Vim's errorformat, etc. to detect and report errors.
+" 
+" Note, call DebugProfile or DebugHost first.
+"
+" Args:
+"   - (optional) the credentials to use, e.g. emma_tst@ukwok-pc1385-vpc
+"   - the command to run, e.g. 'FidRun testKit_Test -f ...'
+"   
+command! -nargs=* DebugDispatch
+            \ call remotedebug#Dispatch(<f-args>)
+"}}}
+
 " Command: DebugRun {{{
 "
 " The 'DebugRun' command starts dbuegging based on profile, runs up pyclewn 
@@ -128,7 +155,44 @@ command! -nargs=* -complete=custom,remotedebug#CompleteProfile DebugRun
 command! -nargs=* -complete=custom,remotedebug#CompleteProfile DebugAttach
             \ call remotedebug#Attach(<f-args>)
 "}}}
+
+" Command: DebugAtachTerm {{{
 "
+" The 'DebugAtachServer' command starts debugging based on profile, but does not
+" start PyClewn or the netbeans interface. Instead, it uses Vim's TermDebug
+" feature.
+"
+" :DebugAttachTerm 0 MYPROFILE
+"
+command! -nargs=* -complete=custom,remotedebug#CompleteProfile DebugAttachTerm
+            \ call remotedebug#AttachTermDebug(<f-args>)
+"}}}
+
+" Command: DebugRestart {{{
+"
+" The 'DebugRestart' command reloads and restarts the application from within a
+" debugging session. Useful when attaching/running and wanting to start again
+" after rebuilding.
+"
+" Example:
+" :DebugProfile OrdSvr@dev-vm
+" :DebugRestart
+"
+" Example:
+" :DebugProfileWrite OrdSvr@dev-vm
+"                 \ '$BUILD_ROOT/debug64/bin/emma_OrdSvr'
+"                 \ 'emma_tst@ukwok-pc458'
+"                 \ '/opt/rh/devtoolset-2/usr/bin/gdbserver'
+"                 \ '$CASE/site-specific/bin64/emma_OrdSvr -c emma_OrdSvr.1.cfg'
+"                 \ 'ExecTclProc -notrace Fid_ProcessRunning EMMA_ORDSVR_1' 
+" :DebugProfile OrdSvr@dev-vm
+" :DebugAtach 0
+" :DebugRestart
+command! -nargs=* DebugRestart 
+            \ call remotedebug#Restart(<f-args>)
+"}}}
+
+
 " Command: DebugReset {{{
 "
 " The 'DebugReset' command closes down pyclewn

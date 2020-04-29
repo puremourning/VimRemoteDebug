@@ -1,4 +1,4 @@
-" Vim global plugin for remote debugging with pyclewn
+" Vim global plugin for remote debugging with vimspector
 " Last Change:  20 Oct 2014
 " Maintainer:   Ben Jackson
 "
@@ -13,12 +13,19 @@ if exists("s:remotedebug_initialised")
 endif
 let s:remotedebuf_initialised = 1
 
-" global run-zonce {{{
+" utilities for working around Vim foilbles {{{
+function! s:expand( str )
+    " note the second expand() parameter tells it to ignore wildignore!
+    return expand( a:str, 1 )
+endfunction
+" }}}
+
+" global run-once {{{
 " Dictionary mapping profile name on to dictionary of profile parameters
 let s:profiles={}
 let s:current_profile=''
 let s:reset_cmd=''
-let s:script_folder_path = escape( expand( '<sfile>:p:h' ), '\' ) . "/../keys"
+let s:script_folder_path = escape( s:expand( '<sfile>:p:h' ), '\' ) . "/../keys"
 "}}}
 
 " utilities for output {{{
@@ -82,6 +89,14 @@ endfunction
 function! remotedebug#CompleteProfile(ArgLead, CmdLine, CursorPos)
     return join(keys(s:profiles), "\n")
 endfunction
+
+
+function! remotedebug#GetCurrentProfile()
+    if empty( s:current_profile )
+        return {}
+    endif
+    return deepcopy( s:profiles[s:current_profile] )
+endfunction
 "}}}
 
 " Run and Attach {{{
@@ -92,9 +107,12 @@ function! s:StartPyClewn()
         return 1
     endif
 
-    execute "Pyclewn --args --gdb=async --clewndir=" . s:script_folder_path
-    call s:info("Waiting for pyclewn...(2 secs)")
-    sleep 2
+    " The best way to specify the args is trhough the global veriable (due to
+    " multiple escaping?)
+    let g:pyclewn_args="--gdb=async"
+    execute "Pyclewn gdb"
+    call s:info("Waiting for pyclewn...(1 secs)")
+    sleep 1
 
     " no way to detect failure of Pyclewn?
     if !has('netbeans_enabled')
@@ -115,7 +133,7 @@ endfunction
 function! s:Connect(profile, port)
 
     " Open the file and load symbols
-    execute "Cfile " . expand(a:profile['binary'])
+    execute "Cfile " . s:expand(a:profile['binary'])
     sleep 500m
 
     " Debugging into shared libraries
@@ -141,12 +159,8 @@ function! s:Connect(profile, port)
         sleep 200m
     endif
 
-    if g:remotedebug_auto_sync_symbols
-        " Sync the completion symbols to auto complete commands in vim if
-        " configured
-        "
-        Csymcompletion
-        sleep 200m
+    if !exists("g:remotedebug_no_open_vars")
+        Cdbgvar
     endif
 
     " and... I think we're done
@@ -192,14 +206,96 @@ function! remotedebug#Run(port, ...)
 
     call s:Connect(l:profile, l:port)
 
-    " show the log file
+    " show the log file TODO: use Dispatch
     call s:ShowLog('~/.remotedebug_log')
+endfunction
+
+function! remotedebug#LoadHostOnly( credentials )
+    let l:name = 'TemporaryHostOnly'
+    call remotedebug#WriteProfile(
+                \ l:name,
+                \ '/bin/echo', 
+                \ a:credentials,
+                \ '',
+                \ '/bin/echo',
+                \ '/bin/false' )
+    call remotedebug#LoadProfile( l:name )
+    return l:name
+endfunction
+
+function! remotedebug#Dispatch( ... )
+    if a:0 > 1
+        let l:credentials = a:1
+        let l:command = a:2
+    else
+        if empty(s:current_profile)
+            call s:warning(
+                \ "No debug profile or host credentials selected. " .
+                \ "Call :DebugHost or :DebugProfile to set one, or " .
+                \ "directly call :DebugDispatch <creds> <command>" )
+            return
+        endif
+
+        let l:profile = s:profiles[ s:current_profile ]
+        let l:credentials = l:profile[ 'creds' ]
+        let l:command = a:1
+    endif
+    
+
+    " TODO: use :terminal or a job attached to a buffer?
+    " TODO: then use :cbuffer or :cgetbuffer on it
+    " 
+    " Actually there's branch
+    execute 'Dispatch ssh ' . l:credentials . ' ' . l:command
+endfunction
+
+function! remotedebug#DispatchCompiler( compiler, ... )
+    if a:0 > 1
+        let l:credentials = a:1
+        let l:command = a:2
+    else
+        if empty(s:current_profile)
+            call s:warning(
+                \ "No debug profile or host credentials selected. " .
+                \ "Call :DebugHost or :DebugProfile to set one, or " .
+                \ "directly call :DebugDispatch <creds> <command>" )
+            return
+        endif
+
+        let l:profile = s:profiles[ s:current_profile ]
+        let l:credentials = l:profile[ 'creds' ]
+        let l:command = a:1
+    endif
+    
+
+    " TODO: use :terminal or a job attached to a buffer?
+    " TODO: then use :cbuffer or :cgetbuffer on it
+    " 
+    " Actually there's branch
+    execute 'Dispatch -compiler=' 
+                \ . a:compiler 
+                \ . ' ssh ' 
+                \ . l:credentials 
+                \ . ' ' 
+                \ . l:command
 endfunction
 
 function! remotedebug#Attach(port, ...)
     " if they supplied a profile name, load it
-    if a:0 != 0
-        call remotedebug#LoadProfile(a:1)
+    let l:profile = ""
+    let l:pid = 0
+    if a:0 > 1 && a:1 == "-pid"
+        let l:pid = a:2
+
+        if a:0 > 2
+            let l:profile = a:3
+        endif
+    elseif a:0 != 0
+        let l:profile = a:1
+    endif
+
+    if l:profile != ""
+        call remotedebug#LoadProfile(l:profile)
     endif
 
     " if they supplied a port, use it, else use the default
@@ -224,14 +320,16 @@ function! remotedebug#Attach(port, ...)
     let s:reset_cmd='Cdetach'
 
     " find the pid
-    let l:pid_out = system('ssh ' 
-                        \ . l:profile['creds'] 
-                        \ .  ' ' 
-                        \ . l:profile['pidCmd']
-                        \ . '| tee ~/.remotedebug_log')
-    
-    " hack: ExecTclProc.. puts a newline on the end?
-    let l:pid = split(l:pid_out, '\v\n')[0]
+    if l:pid <= 0
+        let l:pid_out = system('ssh ' 
+                            \ . l:profile['creds'] 
+                            \ .  ' ' 
+                            \ . l:profile['pidCmd']
+                            \ . '| tee ~/.remotedebug_log')
+        
+        " hack: ExecTclProc.. puts a newline on the end?
+        let l:pid = split(l:pid_out, '\v\n')[0]
+    endif
 
     if l:pid <= 0
         call s:error("Unable to get pid (return: " 
@@ -253,6 +351,86 @@ function! remotedebug#Attach(port, ...)
 
     call s:Connect(l:profile, l:port)
 
+endfunction
+
+function! s:ConnectTermDebug(profile, port)
+    " Nothing yet
+    echom "GDB server  running on port " . a:port
+
+    "execute "TermdebugCommand file " . s:expand(a:profile['binary'])
+    "execute "TermdebugCommand set sysroot remote:/"
+    "execute "TermdebugCommand target remote "
+    "    \ . split(a:profile['creds'], '\v\@')[1] 
+    "    \ . ':'
+    "    \ . a:port
+endfunction
+
+function! remotedebug#AttachTermDebug(port, ...)
+    " if they supplied a profile name, load it
+    let l:profile = ""
+    let l:pid = 0
+    if a:0 > 1 && a:1 == "-pid"
+        let l:pid = a:2
+
+        if a:0 > 2
+            let l:profile = a:3
+        endif
+    elseif a:0 != 0
+        let l:profile = a:1
+    endif
+
+    if l:profile != ""
+        call remotedebug#LoadProfile(l:profile)
+    endif
+
+    " if they supplied a port, use it, else use the default
+    if a:port <= 0
+        let l:port = g:remotedebug_port
+    else
+        let l:port = a:port
+    endif
+
+    if empty(s:current_profile)
+        call s:warning("No profile selected. Call DebugProfile")
+        return
+    endif
+
+    let l:profile = s:profiles[s:current_profile]
+
+    " TODO: Some TermDebug command here
+    let s:reset_cmd=''
+
+    " find the pid
+    if l:pid <= 0
+        let l:pid_out = system('ssh ' 
+                            \ . l:profile['creds'] 
+                            \ .  ' ' 
+                            \ . l:profile['pidCmd']
+                            \ . '| tee ~/.remotedebug_log')
+        
+        " hack: ExecTclProc.. puts a newline on the end?
+        let l:pid = split(l:pid_out, '\v\n')[0]
+    endif
+
+    if l:pid <= 0
+        call s:error("Unable to get pid (return: " 
+                    \ . l:pid 
+                    \ . "). Is it running?")
+        return
+    endif
+
+    " start gdbserver remotely
+    let l:command = l:profile['gdbserver'] 
+                \ . ' --attach :'
+                \ . l:port 
+                \ . ' '
+                \ . l:pid
+                \ . ' | tee ~/.remotedebug_log &'
+
+    call system('ssh ' . l:profile['creds'] . ' ' . l:command)
+    sleep 500m
+
+    call s:ConnectTermDebug(l:profile, l:port)
 endfunction
 
 " Kill any currently running debug session, but don't close down pyclewn
@@ -282,7 +460,7 @@ function! remotedebug#Reset()
     endif
 
     call s:ResetRunning()
-    call pyclewn#reset()
+    Cexitclewn
 endfunction
 " }}}
 
@@ -328,7 +506,7 @@ endfunction
 
 " global run-once {{{
 " load profiles
-let s:profile_path = expand(g:remotedebug_profile_path)
+let s:profile_path = s:expand(g:remotedebug_profile_path)
 if filereadable(s:profile_path)
     execute "source " . s:profile_path
 endif
