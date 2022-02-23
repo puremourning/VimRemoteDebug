@@ -95,7 +95,13 @@ function! remotedebug#GetCurrentProfile()
     if empty( s:current_profile )
         return {}
     endif
-    return deepcopy( s:profiles[s:current_profile] )
+    let prof = deepcopy( s:profiles[s:current_profile] )
+
+    if prof.creds =~ '^docker://'
+        let prof.container = strpart( prof.creds, len( 'docker://' ) )
+        unlet prof.creds
+    endif
+    return prof
 endfunction
 "}}}
 
@@ -223,6 +229,27 @@ function! remotedebug#LoadHostOnly( credentials )
     return l:name
 endfunction
 
+function! remotedebug#GetExecCmd( creds, cmd )
+    if a:creds =~# '^docker://'
+        return 'docker exec ' . strpart( a:creds, len( 'docker://' ) ) 
+                    \ . ' "'
+                    \ . a:cmd
+                    \ . '"'
+    else
+        return 'ssh ' . a:creds . ' ' . a:cmd
+    endif
+endfunction
+
+function s:Dispatch( cmd )
+    let s = &shell
+    set shell=/bin/bash
+    try
+        execute a:cmd
+    finally
+        let &shell = s
+    endtry
+endfunction
+
 function! remotedebug#Dispatch( ... )
     if a:0 > 1
         let l:credentials = a:1
@@ -242,11 +269,8 @@ function! remotedebug#Dispatch( ... )
     endif
     
 
-    " TODO: use :terminal or a job attached to a buffer?
-    " TODO: then use :cbuffer or :cgetbuffer on it
-    " 
-    " Actually there's branch
-    execute 'Dispatch ssh ' . l:credentials . ' ' . l:command
+    call s:Dispatch( 
+        \ 'Dispatch ' . remotedebug#GetExecCmd( l:credentials, l:command ) )
 endfunction
 
 function! remotedebug#DispatchCompiler( compiler, ... )
@@ -267,17 +291,10 @@ function! remotedebug#DispatchCompiler( compiler, ... )
         let l:command = a:1
     endif
     
-
-    " TODO: use :terminal or a job attached to a buffer?
-    " TODO: then use :cbuffer or :cgetbuffer on it
-    " 
-    " Actually there's branch
-    execute 'Dispatch -compiler=' 
+    call s:Dispatch( 'Dispatch -compiler=' 
                 \ . a:compiler 
-                \ . ' ssh ' 
-                \ . l:credentials 
-                \ . ' ' 
-                \ . l:command
+                \ . ' '
+                \ . remotedebug#GetExecCmd( l:credentials, l:command ) )
 endfunction
 
 function! remotedebug#Attach(port, ...)
