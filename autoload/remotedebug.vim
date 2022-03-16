@@ -231,8 +231,15 @@ endfunction
 
 function! remotedebug#GetExecCmd( creds, cmd )
     if a:creds =~# '^docker://'
-        return 'docker exec ' . strpart( a:creds, len( 'docker://' ) ) 
-                    \ . ' "'
+        let c = strpart( a:creds, len( 'docker://' ) )->split( ' ' )
+        let container = c[ 0 ]
+        if len( c ) > 1
+            let launcher = c->slice( 1 )->join( ' ' )
+        else
+            let launcher = '/bin/csh'
+        endif
+        return 'docker exec ' . container
+                    \ . ' ' . launcher . ' -c "'
                     \ . a:cmd
                     \ . '"'
     else
